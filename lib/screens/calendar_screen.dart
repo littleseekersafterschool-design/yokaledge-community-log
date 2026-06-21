@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../providers/app_provider.dart';
 import '../models/daily_log.dart';
+import '../providers/app_provider.dart';
 import '../utils/app_theme.dart';
 
 class CalendarScreen extends StatefulWidget {
@@ -13,30 +13,27 @@ class CalendarScreen extends StatefulWidget {
 
 class _CalendarScreenState extends State<CalendarScreen> {
   late DateTime _focusedMonth;
-  String? _selectedDate;
+  late String _selectedDate;
 
   @override
   void initState() {
     super.initState();
-    _focusedMonth = DateTime.now();
     final now = DateTime.now();
-    _selectedDate =
-        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    _focusedMonth = DateTime(now.year, now.month, 1);
+    _selectedDate = _dateToString(now);
   }
 
-  String _dateToString(DateTime date) {
+  static String _dateToString(DateTime date) {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 
-  void _previousMonth() {
+  void _moveMonth(int offset) {
     setState(() {
-      _focusedMonth = DateTime(_focusedMonth.year, _focusedMonth.month - 1, 1);
-    });
-  }
-
-  void _nextMonth() {
-    setState(() {
-      _focusedMonth = DateTime(_focusedMonth.year, _focusedMonth.month + 1, 1);
+      _focusedMonth = DateTime(
+        _focusedMonth.year,
+        _focusedMonth.month + offset,
+        1,
+      );
     });
   }
 
@@ -46,274 +43,309 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
     return Column(
       children: [
-        // Upper half: Calendar + selected day logs
-        Expanded(
-          flex: 1,
-          child: Column(
-            children: [
-              _buildCalendar(provider),
-              Expanded(child: _buildSelectedDayLogs(provider)),
-            ],
-          ),
+        _CalendarGrid(
+          focusedMonth: _focusedMonth,
+          selectedDate: _selectedDate,
+          onPrevious: () => _moveMonth(-1),
+          onNext: () => _moveMonth(1),
+          onDateSelected: (date) => setState(() => _selectedDate = date),
         ),
-        // Divider
-        Container(height: 1, color: AppTheme.divider),
-        // Lower half: Monthly average score graph
+        const Divider(height: 1),
         Expanded(
-          flex: 1,
-          child: _buildMonthlyGraph(provider),
+          child: _SelectedDayRecords(
+            selectedDate: _selectedDate,
+            provider: provider,
+          ),
         ),
       ],
     );
   }
+}
 
-  Widget _buildCalendar(AppProvider provider) {
+class _CalendarGrid extends StatelessWidget {
+  final DateTime focusedMonth;
+  final String selectedDate;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+  final ValueChanged<String> onDateSelected;
+
+  const _CalendarGrid({
+    required this.focusedMonth,
+    required this.selectedDate,
+    required this.onPrevious,
+    required this.onNext,
+    required this.onDateSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<AppProvider>();
     final facilityId = provider.currentFacility?.facilityId;
-    if (facilityId == null) return const SizedBox.shrink();
-
-    final year = _focusedMonth.year;
-    final month = _focusedMonth.month;
+    final year = focusedMonth.year;
+    final month = focusedMonth.month;
     final firstDay = DateTime(year, month, 1);
     final lastDay = DateTime(year, month + 1, 0);
-    final startWeekday = firstDay.weekday % 7; // Sunday = 0
-
-    // Get logs for this month to show score indicators
-    final monthLogs = provider.db.getLogsByMonth(facilityId, year, month);
+    final startWeekday = firstDay.weekday % 7;
     final logsByDate = <String, List<DailyLog>>{};
-    for (final log in monthLogs) {
-      logsByDate.putIfAbsent(log.logDate, () => []).add(log);
+
+    if (facilityId != null) {
+      final monthLogs = provider.db.getLogsByMonth(facilityId, year, month);
+      for (final log in monthLogs) {
+        logsByDate.putIfAbsent(log.logDate, () => []).add(log);
+      }
     }
 
-    final weekDayLabels = ['日', '月', '火', '水', '木', '金', '土'];
-    final now = DateTime.now();
-    final todayStr = _dateToString(now);
+    final today = _CalendarScreenState._dateToString(DateTime.now());
+    final weekdayLabels = ['日', '月', '火', '水', '木', '金', '土'];
+    final weekCount = ((lastDay.day + startWeekday - 1) ~/ 7) + 1;
 
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Month navigation
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               IconButton(
                 icon: const Icon(Icons.chevron_left_rounded),
-                onPressed: _previousMonth,
-                color: AppTheme.textSecondary,
-                iconSize: 28,
+                onPressed: onPrevious,
               ),
-              Text(
-                '$year年${month}月',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textPrimary,
+              Expanded(
+                child: Center(
+                  child: Text(
+                    '$year年 $month月',
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
                 ),
               ),
               IconButton(
                 icon: const Icon(Icons.chevron_right_rounded),
-                onPressed: _nextMonth,
-                color: AppTheme.textSecondary,
-                iconSize: 28,
+                onPressed: onNext,
               ),
             ],
           ),
-          // Weekday headers
           Row(
-            children: weekDayLabels.map((label) {
-              final isSunday = label == '日';
-              final isSaturday = label == '土';
+            children: weekdayLabels.asMap().entries.map((entry) {
+              final index = entry.key;
               return Expanded(
                 child: Center(
                   child: Text(
-                    label,
+                    entry.value,
                     style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: isSunday
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: index == 0
                           ? AppTheme.error
-                          : isSaturday
-                              ? AppTheme.primaryBlue
-                              : AppTheme.textSecondary,
+                          : index == 6
+                          ? AppTheme.primaryBlue
+                          : AppTheme.textSecondary,
                     ),
                   ),
                 ),
               );
             }).toList(),
           ),
-          const SizedBox(height: 2),
-          // Calendar grid
-          ...List.generate(
-            ((lastDay.day + startWeekday - 1) ~/ 7) + 1,
-            (weekIndex) {
-              return Row(
-                children: List.generate(7, (dayIndex) {
-                  final dayNum = weekIndex * 7 + dayIndex - startWeekday + 1;
-                  if (dayNum < 1 || dayNum > lastDay.day) {
-                    return const Expanded(child: SizedBox(height: 38));
-                  }
+          const SizedBox(height: 4),
+          ...List.generate(weekCount, (weekIndex) {
+            return Row(
+              children: List.generate(7, (dayIndex) {
+                final day = weekIndex * 7 + dayIndex - startWeekday + 1;
+                if (day < 1 || day > lastDay.day) {
+                  return const Expanded(child: SizedBox(height: 42));
+                }
 
-                  final dateStr = _dateToString(DateTime(year, month, dayNum));
-                  final isSelected = dateStr == _selectedDate;
-                  final isToday = dateStr == todayStr;
-                  final hasLogs = logsByDate.containsKey(dateStr);
-                  final dayLogs = logsByDate[dateStr] ?? [];
-                  final dayAvg = dayLogs.isEmpty
-                      ? 0.0
-                      : dayLogs.fold<int>(0, (s, l) => s + l.score) /
+                final date = _CalendarScreenState._dateToString(
+                  DateTime(year, month, day),
+                );
+                final isSelected = date == selectedDate;
+                final isToday = date == today;
+                final dayLogs = logsByDate[date] ?? [];
+                final average = dayLogs.isEmpty
+                    ? null
+                    : dayLogs.fold<int>(0, (sum, log) => sum + log.score) /
                           dayLogs.length;
 
-                  return Expanded(
-                    child: GestureDetector(
-                      onTap: () {
-                        setState(() => _selectedDate = dateStr);
-                      },
-                      child: Container(
-                        height: 38,
-                        margin: const EdgeInsets.all(1),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? AppTheme.primaryGreen
-                              : isToday
-                                  ? AppTheme.lightGreen
-                                  : null,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              '$dayNum',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: isToday || isSelected
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
+                return Expanded(
+                  child: GestureDetector(
+                    onTap: () => onDateSelected(date),
+                    child: Container(
+                      height: 42,
+                      margin: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? AppTheme.primaryGreen
+                            : isToday
+                            ? AppTheme.lightGreen
+                            : null,
+                        borderRadius: BorderRadius.circular(10),
+                        border: isToday && !isSelected
+                            ? Border.all(color: AppTheme.primaryGreen)
+                            : null,
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '$day',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: isSelected || isToday
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                              color: isSelected
+                                  ? Colors.white
+                                  : dayIndex == 0
+                                  ? AppTheme.error
+                                  : dayIndex == 6
+                                  ? AppTheme.primaryBlue
+                                  : AppTheme.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          if (average != null)
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
                                 color: isSelected
                                     ? Colors.white
-                                    : dayIndex == 0
-                                        ? AppTheme.error
-                                        : dayIndex == 6
-                                            ? AppTheme.primaryBlue
-                                            : AppTheme.textPrimary,
+                                    : AppTheme.getScoreColor(average),
                               ),
-                            ),
-                            if (hasLogs)
-                              Container(
-                                width: 6,
-                                height: 6,
-                                margin: const EdgeInsets.only(top: 1),
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: isSelected
-                                      ? Colors.white
-                                      : AppTheme.getScoreColor(dayAvg),
-                                ),
-                              )
-                            else
-                              const SizedBox(height: 7),
-                          ],
-                        ),
+                            )
+                          else
+                            const SizedBox(height: 7),
+                        ],
                       ),
                     ),
-                  );
-                }),
-              );
-            },
-          ),
+                  ),
+                );
+              }),
+            );
+          }),
         ],
       ),
     );
   }
+}
 
-  Widget _buildSelectedDayLogs(AppProvider provider) {
-    if (_selectedDate == null || provider.currentFacility == null) {
-      return const Center(
-        child: Text('日付を選択してください', style: TextStyle(color: AppTheme.textSecondary)),
-      );
+class _SelectedDayRecords extends StatelessWidget {
+  final String selectedDate;
+  final AppProvider provider;
+
+  const _SelectedDayRecords({
+    required this.selectedDate,
+    required this.provider,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final facility = provider.currentFacility;
+    if (facility == null) {
+      return const Center(child: Text('施設が選択されていません'));
     }
 
-    final logs = provider.db
-        .getLogsByDate(provider.currentFacility!.facilityId, _selectedDate!);
+    final logs = provider.db.getLogsByDate(facility.facilityId, selectedDate)
+      ..sort((a, b) {
+        final staffCompare = provider
+            .getStaffName(a.staffId)
+            .compareTo(provider.getStaffName(b.staffId));
+        if (staffCompare != 0) return staffCompare;
+        return provider
+            .getGoalTitle(a.goalId)
+            .compareTo(provider.getGoalTitle(b.goalId));
+      });
 
     if (logs.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.event_busy_rounded, size: 32, color: AppTheme.divider),
-            const SizedBox(height: 6),
-            Text(
-              '$_selectedDate\n記録なし',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12,
-                color: AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    // Group by staff
-    final logsByStaff = <String, List<DailyLog>>{};
-    for (final log in logs) {
-      logsByStaff.putIfAbsent(log.staffId, () => []).add(log);
-    }
-
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      children: [
-        // Date header
-        Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Row(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.calendar_today_rounded,
-                  size: 14, color: AppTheme.primaryGreen),
-              const SizedBox(width: 6),
+              Icon(Icons.event_busy_rounded, size: 48, color: AppTheme.divider),
+              const SizedBox(height: 12),
               Text(
-                _selectedDate!,
+                '$selectedDate の記録はありません',
                 style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.textSecondary,
+                  fontSize: 14,
                 ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                '${logs.length}件の記録',
-                style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
               ),
             ],
           ),
         ),
-        ...logsByStaff.entries.map((entry) {
-          final staffName = provider.getStaffName(entry.key);
-          final staffLogs = entry.value;
-          final staffAvg =
-              staffLogs.fold<int>(0, (s, l) => s + l.score) / staffLogs.length;
+      );
+    }
+
+    final logsByStaff = <String, List<DailyLog>>{};
+    for (final log in logs) {
+      logsByStaff.putIfAbsent(log.staffId, () => []).add(log);
+    }
+    final staffIds = logsByStaff.keys.toList()
+      ..sort(
+        (a, b) => provider.getStaffName(a).compareTo(provider.getStaffName(b)),
+      );
+
+    final dayAverage =
+        logs.fold<int>(0, (sum, log) => sum + log.score) / logs.length;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          children: [
+            const Icon(
+              Icons.calendar_today_rounded,
+              size: 16,
+              color: AppTheme.primaryGreen,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              selectedDate,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(width: 10),
+            _InfoPill(label: '記録', value: '${logs.length}件'),
+            const SizedBox(width: 6),
+            _InfoPill(label: '平均', value: dayAverage.toStringAsFixed(1)),
+          ],
+        ),
+        const SizedBox(height: 12),
+        ...staffIds.map((staffId) {
+          final staffLogs = logsByStaff[staffId]!;
+          final staffName = provider.getStaffName(staffId);
+          final staffAverage =
+              staffLogs.fold<int>(0, (sum, log) => sum + log.score) /
+              staffLogs.length;
 
           return Card(
-            margin: const EdgeInsets.only(bottom: 6),
+            margin: const EdgeInsets.only(bottom: 12),
             child: Padding(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
                       CircleAvatar(
-                        radius: 12,
-                        backgroundColor:
-                            AppTheme.primaryGreen.withValues(alpha: 0.15),
+                        radius: 15,
+                        backgroundColor: AppTheme.primaryGreen.withValues(
+                          alpha: 0.14,
+                        ),
                         child: Text(
                           staffName.isNotEmpty ? staffName[0] : '?',
                           style: const TextStyle(
-                            fontSize: 10,
+                            fontSize: 12,
                             fontWeight: FontWeight.bold,
                             color: AppTheme.primaryGreen,
                           ),
@@ -324,78 +356,32 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         child: Text(
                           staffName,
                           style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textPrimary,
                           ),
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: AppTheme.getScoreColor(staffAvg)
-                              .withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          '平均 ${staffAvg.toStringAsFixed(1)}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.getScoreColor(staffAvg),
-                          ),
-                        ),
+                      _InfoPill(
+                        label: '平均',
+                        value: staffAverage.toStringAsFixed(1),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 4,
-                    runSpacing: 4,
-                    children: staffLogs.map((log) {
-                      final goal = provider.getGoal(log.goalId);
-                      final goalTitle = provider.getGoalTitle(log.goalId);
-                      final color = goal != null
+                  const SizedBox(height: 10),
+                  ...staffLogs.map((log) {
+                    final goal = provider.getGoal(log.goalId);
+                    return _LogDetailTile(
+                      log: log,
+                      goalTitle: provider.getGoalTitle(log.goalId),
+                      goalIcon: goal != null
+                          ? AppTheme.getGoalIcon(goal.icon)
+                          : Icons.star_rounded,
+                      goalColor: goal != null
                           ? AppTheme.getGoalColor(goal.color)
-                          : AppTheme.primaryGreen;
-                      return Tooltip(
-                        message: '$goalTitle: ${log.score}点'
-                            '${log.comment.isNotEmpty ? '\n${log.comment}' : ''}',
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: color.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                                color: color.withValues(alpha: 0.3)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                goal != null
-                                    ? AppTheme.getGoalIcon(goal.icon)
-                                    : Icons.star,
-                                size: 12,
-                                color: color,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                '${log.score}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppTheme.getScoreColor(
-                                      log.score.toDouble()),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
+                          : AppTheme.primaryGreen,
+                    );
+                  }),
                 ],
               ),
             ),
@@ -404,277 +390,116 @@ class _CalendarScreenState extends State<CalendarScreen> {
       ],
     );
   }
+}
 
-  Widget _buildMonthlyGraph(AppProvider provider) {
-    final facilityId = provider.currentFacility?.facilityId;
-    if (facilityId == null) {
-      return const Center(child: Text('施設が選択されていません'));
-    }
+class _InfoPill extends StatelessWidget {
+  final String label;
+  final String value;
 
-    // Get last 6 months of data
-    final now = DateTime.now();
-    final monthlyData = <_MonthData>[];
+  const _InfoPill({required this.label, required this.value});
 
-    for (var i = 5; i >= 0; i--) {
-      final date = DateTime(now.year, now.month - i, 1);
-      final logs = provider.db.getLogsByMonth(facilityId, date.year, date.month);
-      final avg = logs.isEmpty
-          ? 0.0
-          : logs.fold<int>(0, (s, l) => s + l.score) / logs.length;
-      monthlyData.add(_MonthData(
-        year: date.year,
-        month: date.month,
-        average: avg,
-        logCount: logs.length,
-      ));
-    }
-
-    final hasData = monthlyData.any((m) => m.logCount > 0);
-
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.bar_chart_rounded,
-                  size: 20, color: AppTheme.primaryGreen),
-              const SizedBox(width: 6),
-              const Text(
-                '月別平均スコア',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '過去6ヶ月',
-                style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: hasData
-                ? _BarChart(data: monthlyData)
-                : Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.bar_chart_rounded,
-                            size: 48, color: AppTheme.divider),
-                        const SizedBox(height: 8),
-                        Text(
-                          'データがありません',
-                          style: TextStyle(
-                              fontSize: 13, color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                  ),
-          ),
-        ],
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppTheme.background,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: Text(
+        '$label $value',
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: AppTheme.textSecondary,
+        ),
       ),
     );
   }
 }
 
-class _MonthData {
-  final int year;
-  final int month;
-  final double average;
-  final int logCount;
+class _LogDetailTile extends StatelessWidget {
+  final DailyLog log;
+  final String goalTitle;
+  final IconData goalIcon;
+  final Color goalColor;
 
-  _MonthData({
-    required this.year,
-    required this.month,
-    required this.average,
-    required this.logCount,
+  const _LogDetailTile({
+    required this.log,
+    required this.goalTitle,
+    required this.goalIcon,
+    required this.goalColor,
   });
-
-  String get label => '${month}月';
-  String get fullLabel => '$year/${month.toString().padLeft(2, '0')}';
-}
-
-class _BarChart extends StatelessWidget {
-  final List<_MonthData> data;
-
-  const _BarChart({required this.data});
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return CustomPaint(
-          size: Size(constraints.maxWidth, constraints.maxHeight),
-          painter: _BarChartPainter(data: data),
-        );
-      },
+    final scoreColor = AppTheme.getScoreColor(log.score.toDouble());
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppTheme.background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: goalColor.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(goalIcon, size: 16, color: goalColor),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  goalTitle,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: scoreColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  'スコア ${log.score}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: scoreColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          Text(
+            log.comment.trim().isEmpty ? 'コメントなし' : log.comment.trim(),
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.45,
+              color: log.comment.trim().isEmpty
+                  ? AppTheme.textSecondary
+                  : AppTheme.textPrimary,
+            ),
+          ),
+        ],
+      ),
     );
-  }
-}
-
-class _BarChartPainter extends CustomPainter {
-  final List<_MonthData> data;
-
-  _BarChartPainter({required this.data});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final leftPadding = 30.0;
-    final bottomPadding = 36.0;
-    final topPadding = 8.0;
-    final chartWidth = size.width - leftPadding - 12;
-    final chartHeight = size.height - bottomPadding - topPadding;
-
-    // Draw Y-axis labels and grid lines
-    final gridPaint = Paint()
-      ..color = AppTheme.divider
-      ..strokeWidth = 0.5;
-
-    for (var i = 0; i <= 5; i++) {
-      final y = topPadding + chartHeight - (chartHeight * i / 5);
-
-      // Grid line
-      canvas.drawLine(
-        Offset(leftPadding, y),
-        Offset(size.width - 12, y),
-        gridPaint,
-      );
-
-      // Y-axis label
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: '$i',
-          style: TextStyle(
-            fontSize: 10,
-            color: AppTheme.textSecondary,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      textPainter.layout();
-      textPainter.paint(
-        canvas,
-        Offset(leftPadding - textPainter.width - 6, y - textPainter.height / 2),
-      );
-    }
-
-    // Draw bars
-    final barCount = data.length;
-    if (barCount == 0) return;
-
-    final barGroupWidth = chartWidth / barCount;
-    final barWidth = barGroupWidth * 0.55;
-    final barSpacing = (barGroupWidth - barWidth) / 2;
-
-    for (var i = 0; i < data.length; i++) {
-      final item = data[i];
-      final x = leftPadding + i * barGroupWidth + barSpacing;
-      final barHeight = (item.average / 5.0) * chartHeight;
-      final barTop = topPadding + chartHeight - barHeight;
-
-      if (item.logCount > 0) {
-        // Bar fill with gradient effect
-        final barColor = AppTheme.getScoreColor(item.average);
-        final barRect = RRect.fromRectAndRadius(
-          Rect.fromLTWH(x, barTop, barWidth, barHeight),
-          const Radius.circular(6),
-        );
-
-        final barPaint = Paint()
-          ..color = barColor.withValues(alpha: 0.75)
-          ..style = PaintingStyle.fill;
-        canvas.drawRRect(barRect, barPaint);
-
-        // Bar border
-        final borderPaint = Paint()
-          ..color = barColor
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5;
-        canvas.drawRRect(barRect, borderPaint);
-
-        // Score value on top
-        final scorePainter = TextPainter(
-          text: TextSpan(
-            text: item.average.toStringAsFixed(1),
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-              color: barColor,
-            ),
-          ),
-          textDirection: TextDirection.ltr,
-        );
-        scorePainter.layout();
-        scorePainter.paint(
-          canvas,
-          Offset(x + barWidth / 2 - scorePainter.width / 2, barTop - 14),
-        );
-      } else {
-        // No data indicator
-        final noDataPaint = Paint()
-          ..color = AppTheme.divider
-          ..style = PaintingStyle.fill;
-        final noDataRect = RRect.fromRectAndRadius(
-          Rect.fromLTWH(
-              x, topPadding + chartHeight - 4, barWidth, 4),
-          const Radius.circular(2),
-        );
-        canvas.drawRRect(noDataRect, noDataPaint);
-      }
-
-      // Month label
-      final labelPainter = TextPainter(
-        text: TextSpan(
-          text: item.label,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
-            color: AppTheme.textPrimary,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      labelPainter.layout();
-      labelPainter.paint(
-        canvas,
-        Offset(
-          x + barWidth / 2 - labelPainter.width / 2,
-          topPadding + chartHeight + 6,
-        ),
-      );
-
-      // Count label
-      if (item.logCount > 0) {
-        final countPainter = TextPainter(
-          text: TextSpan(
-            text: '${item.logCount}件',
-            style: TextStyle(
-              fontSize: 9,
-              color: AppTheme.textSecondary,
-            ),
-          ),
-          textDirection: TextDirection.ltr,
-        );
-        countPainter.layout();
-        countPainter.paint(
-          canvas,
-          Offset(
-            x + barWidth / 2 - countPainter.width / 2,
-            topPadding + chartHeight + 20,
-          ),
-        );
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _BarChartPainter oldDelegate) {
-    return oldDelegate.data != data;
   }
 }

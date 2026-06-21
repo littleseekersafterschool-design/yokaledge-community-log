@@ -32,6 +32,8 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+android/local.properties
+functions/
 
 # Symbolication related
 app.*.symbols

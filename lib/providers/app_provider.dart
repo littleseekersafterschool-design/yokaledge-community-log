@@ -65,16 +65,13 @@ class AppProvider extends ChangeNotifier {
   }
 
   // Staff management
-  List<Staff> get staffList =>
-      _currentFacility != null
-          ? _db.getStaffByFacility(_currentFacility!.facilityId,
-              activeOnly: false)
-          : [];
+  List<Staff> get staffList => _currentFacility != null
+      ? _db.getStaffByFacility(_currentFacility!.facilityId, activeOnly: false)
+      : [];
 
-  List<Staff> get activeStaffList =>
-      _currentFacility != null
-          ? _db.getStaffByFacility(_currentFacility!.facilityId)
-          : [];
+  List<Staff> get activeStaffList => _currentFacility != null
+      ? _db.getStaffByFacility(_currentFacility!.facilityId)
+      : [];
 
   Future<Staff> addStaff(String name) async {
     final staff = await _db.addStaff(_currentFacility!.facilityId, name);
@@ -96,16 +93,13 @@ class AppProvider extends ChangeNotifier {
   }
 
   // Goals management
-  List<Goal> get goals =>
-      _currentFacility != null
-          ? _db.getGoalsByFacility(_currentFacility!.facilityId)
-          : [];
+  List<Goal> get goals => _currentFacility != null
+      ? _db.getGoalsByFacility(_currentFacility!.facilityId)
+      : [];
 
-  List<Goal> get allGoals =>
-      _currentFacility != null
-          ? _db.getGoalsByFacility(_currentFacility!.facilityId,
-              activeOnly: false)
-          : [];
+  List<Goal> get allGoals => _currentFacility != null
+      ? _db.getGoalsByFacility(_currentFacility!.facilityId, activeOnly: false)
+      : [];
 
   Future<Goal> addGoal(Goal goal) async {
     final result = await _db.addGoal(goal);
@@ -124,8 +118,7 @@ class AppProvider extends ChangeNotifier {
   }
 
   Future<void> applyTemplate(String templateName) async {
-    await _db.applyGoalTemplate(
-        _currentFacility!.facilityId, templateName);
+    await _db.applyGoalTemplate(_currentFacility!.facilityId, templateName);
     notifyListeners();
   }
 
@@ -156,11 +149,15 @@ class AppProvider extends ChangeNotifier {
     return _db.getLogsByStaff(_currentStaff!.staffId);
   }
 
+  List<DailyLog> getLogsForCurrentFacility() {
+    if (_currentFacility == null) return [];
+    return _db.getLogsByFacility(_currentFacility!.facilityId);
+  }
+
   // Dashboard data
-  String? get latestLogDate =>
-      _currentFacility != null
-          ? _db.getLatestLogDate(_currentFacility!.facilityId)
-          : null;
+  String? get latestLogDate => _currentFacility != null
+      ? _db.getLatestLogDate(_currentFacility!.facilityId)
+      : null;
 
   double get latestDayAverage {
     if (_currentFacility == null) return 0;
@@ -174,7 +171,10 @@ class AppProvider extends ChangeNotifier {
     if (_currentFacility == null) return 0;
     final now = DateTime.now();
     final logs = _db.getLogsByMonth(
-        _currentFacility!.facilityId, now.year, now.month);
+      _currentFacility!.facilityId,
+      now.year,
+      now.month,
+    );
     return _db.getAverageScore(logs);
   }
 
@@ -190,14 +190,16 @@ class AppProvider extends ChangeNotifier {
     if (_currentFacility == null) return {};
     final now = DateTime.now();
     final logs = _db.getLogsByMonth(
-        _currentFacility!.facilityId, now.year, now.month);
+      _currentFacility!.facilityId,
+      now.year,
+      now.month,
+    );
     return _db.getAverageByGoal(logs);
   }
 
-  List<DailyLog> get recentComments =>
-      _currentFacility != null
-          ? _db.getRecentComments(_currentFacility!.facilityId)
-          : [];
+  List<DailyLog> get recentComments => _currentFacility != null
+      ? _db.getRecentComments(_currentFacility!.facilityId)
+      : [];
 
   // Helpers
   String getStaffName(String staffId) => _db.getStaffName(staffId);

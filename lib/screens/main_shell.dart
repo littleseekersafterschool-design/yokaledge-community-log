@@ -5,7 +5,9 @@ import '../utils/app_theme.dart';
 import 'dashboard_screen.dart';
 import 'evaluation_input_screen.dart';
 import 'calendar_screen.dart';
+import 'comments_screen.dart';
 import 'history_screen.dart';
+import 'review_screen.dart';
 import 'settings_screen.dart';
 
 class MainShell extends StatefulWidget {
@@ -22,15 +24,19 @@ class _MainShellState extends State<MainShell> {
     DashboardScreen(),
     EvaluationInputScreen(),
     CalendarScreen(),
+    CommentsScreen(),
     HistoryScreen(),
+    ReviewScreen(),
     SettingsScreen(),
   ];
 
   static const _titles = [
-    'ダッシュボード',
+    'ホーム',
     '今日の評価',
     'カレンダー',
+    'コメント',
     '評価履歴',
+    'レビュー',
     '設定',
   ];
 
@@ -47,10 +53,7 @@ class _MainShellState extends State<MainShell> {
           padding: const EdgeInsets.all(6),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: Image.asset(
-              'assets/images/logo.png',
-              fit: BoxFit.contain,
-            ),
+            child: Image.asset('assets/images/logo.png', fit: BoxFit.contain),
           ),
         ),
         leadingWidth: 44,
@@ -63,8 +66,9 @@ class _MainShellState extends State<MainShell> {
                 children: [
                   CircleAvatar(
                     radius: 14,
-                    backgroundColor:
-                        AppTheme.primaryGreen.withValues(alpha: 0.15),
+                    backgroundColor: AppTheme.primaryGreen.withValues(
+                      alpha: 0.15,
+                    ),
                     child: Text(
                       staff.staffName.isNotEmpty ? staff.staffName[0] : '?',
                       style: const TextStyle(
@@ -89,16 +93,16 @@ class _MainShellState extends State<MainShell> {
         bottom: facility != null
             ? PreferredSize(
                 preferredSize: const Size.fromHeight(1),
-                child: Container(
-                  height: 1,
-                  color: AppTheme.divider,
-                ),
+                child: Container(height: 1, color: AppTheme.divider),
               )
             : null,
       ),
       body: SafeArea(child: _pages[_currentIndex]),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
+        type: BottomNavigationBarType.fixed,
+        selectedFontSize: 11,
+        unselectedFontSize: 10,
         onTap: (i) => setState(() => _currentIndex = i),
         items: const [
           BottomNavigationBarItem(
@@ -107,15 +111,23 @@ class _MainShellState extends State<MainShell> {
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.edit_note_rounded),
-            label: '評価入力',
+            label: '評価',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.calendar_month_rounded),
             label: 'カレンダー',
           ),
           BottomNavigationBarItem(
+            icon: Icon(Icons.comment_rounded),
+            label: 'コメント',
+          ),
+          BottomNavigationBarItem(
             icon: Icon(Icons.history_rounded),
             label: '履歴',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.summarize_rounded),
+            label: 'レビュー',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.settings_rounded),

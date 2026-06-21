@@ -1,5 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 class Goal {
   final String goalId;
   final String facilityId;
@@ -56,7 +54,6 @@ class Goal {
       );
 
   static DateTime _parseDateTime(dynamic value) {
-    if (value is Timestamp) return value.toDate();
     if (value is String) return DateTime.parse(value);
     return DateTime.now();
   }

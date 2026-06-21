@@ -1,0 +1,10 @@
+{
+  "installCommand": ":",
+  "buildCommand": "if [ ! -d .vercel_flutter ]; then git clone https://github.com/flutter/flutter.git -b stable --depth 1 .vercel_flutter; fi && export PATH=\"$PWD/.vercel_flutter/bin:$PATH\" && flutter config --enable-web && flutter pub get && flutter build web --release",
+  "outputDirectory": "build/web",
+  "functions": {
+    "api/*.js": {
+      "runtime": "nodejs20.x"
+    }
+  }
+}

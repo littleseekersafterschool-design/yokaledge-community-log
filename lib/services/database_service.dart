@@ -1,18 +1,19 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:uuid/uuid.dart';
 import 'dart:convert';
+
 import 'package:crypto/crypto.dart';
-import '../models/facility.dart';
-import '../models/staff.dart';
-import '../models/goal.dart';
+import 'package:http/http.dart' as http;
+import 'package:uuid/uuid.dart';
+
 import '../models/daily_log.dart';
+import '../models/facility.dart';
+import '../models/goal.dart';
+import '../models/staff.dart';
 import '../utils/goal_templates.dart';
+import 'app_config.dart';
 
 class DatabaseService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final _uuid = const Uuid();
 
-  // Local caches for fast synchronous access
   List<Facility> _facilities = [];
   List<Staff> _staffList = [];
   List<Goal> _goalsList = [];
@@ -23,43 +24,62 @@ class DatabaseService {
   }
 
   Future<void> _loadAllData() async {
-    await Future.wait([
-      _loadFacilities(),
-      _loadStaff(),
-      _loadGoals(),
-      _loadLogs(),
-    ]);
+    final data = await _request('bootstrap');
+    _facilities = _asList(data['facilities']).map(Facility.fromMap).toList();
+    _staffList = _asList(data['staff']).map(Staff.fromMap).toList();
+    _goalsList = _asList(data['goals']).map(Goal.fromMap).toList();
+    _logsList = _asList(data['daily_logs']).map(DailyLog.fromMap).toList();
   }
 
-  Future<void> _loadFacilities() async {
-    final snap = await _firestore.collection('facilities').get();
-    _facilities = snap.docs
-        .map((d) => Facility.fromMap(d.data()))
+  List<Map<String, dynamic>> _asList(dynamic value) {
+    if (value is! List) return [];
+    return value
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
         .toList();
   }
 
-  Future<void> _loadStaff() async {
-    final snap = await _firestore.collection('staff').get();
-    _staffList = snap.docs
-        .map((d) => Staff.fromMap(d.data()))
-        .toList();
+  Future<Map<String, dynamic>> _request(
+    String action, {
+    Map<String, dynamic>? body,
+  }) async {
+    final response = await http.post(
+      AppConfig.apiUri('/api/community-log'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'action': action, ...?body}),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'データ通信に失敗しました: ${response.statusCode} ${response.body}',
+      );
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is Map<String, dynamic>) return decoded;
+    throw Exception('データ通信の応答形式が正しくありません。');
   }
 
-  Future<void> _loadGoals() async {
-    final snap = await _firestore.collection('goals').get();
-    _goalsList = snap.docs
-        .map((d) => Goal.fromMap(d.data()))
-        .toList();
+  Future<void> _upsert(
+    String table,
+    String idColumn,
+    Map<String, dynamic> data,
+  ) async {
+    await _request('upsert', body: {
+      'table': table,
+      'idColumn': idColumn,
+      'data': data,
+    });
   }
 
-  Future<void> _loadLogs() async {
-    final snap = await _firestore.collection('daily_logs').get();
-    _logsList = snap.docs
-        .map((d) => DailyLog.fromMap(d.data()))
-        .toList();
+  Future<void> _delete(String table, String idColumn, String id) async {
+    await _request('delete', body: {
+      'table': table,
+      'idColumn': idColumn,
+      'id': id,
+    });
   }
 
-  /// Refresh all caches from Firestore
   Future<void> refresh() async {
     await _loadAllData();
   }
@@ -72,8 +92,6 @@ class DatabaseService {
   bool verifyPassword(String password, String hash) {
     return _hashPassword(password) == hash;
   }
-
-  // ============ Facilities ============
 
   List<Facility> getAllFacilities() => _facilities;
 
@@ -91,15 +109,10 @@ class DatabaseService {
       createdAt: now,
       updatedAt: now,
     );
-    await _firestore
-        .collection('facilities')
-        .doc(facility.facilityId)
-        .set(facility.toMap());
+    await _upsert('facilities', 'facility_id', facility.toMap());
     _facilities.add(facility);
     return facility;
   }
-
-  // ============ Staff ============
 
   List<Staff> getStaffByFacility(String facilityId, {bool activeOnly = true}) {
     return _staffList
@@ -116,35 +129,26 @@ class DatabaseService {
       createdAt: now,
       updatedAt: now,
     );
-    await _firestore
-        .collection('staff')
-        .doc(staff.staffId)
-        .set(staff.toMap());
+    await _upsert('staff', 'staff_id', staff.toMap());
     _staffList.add(staff);
     return staff;
   }
 
   Future<void> updateStaff(Staff staff) async {
-    await _firestore
-        .collection('staff')
-        .doc(staff.staffId)
-        .set(staff.toMap());
+    await _upsert('staff', 'staff_id', staff.toMap());
     _staffList.removeWhere((s) => s.staffId == staff.staffId);
     _staffList.add(staff);
   }
 
   Future<void> deleteStaff(String staffId) async {
-    await _firestore.collection('staff').doc(staffId).delete();
-    _staffList.removeWhere((s) => s.staffId == staffId);
-    // Also delete all logs for this staff
     final logsToDelete = _logsList.where((l) => l.staffId == staffId).toList();
     for (final log in logsToDelete) {
-      await _firestore.collection('daily_logs').doc(log.logId).delete();
+      await _delete('daily_logs', 'log_id', log.logId);
     }
+    await _delete('staff', 'staff_id', staffId);
     _logsList.removeWhere((l) => l.staffId == staffId);
+    _staffList.removeWhere((s) => s.staffId == staffId);
   }
-
-  // ============ Goals ============
 
   List<Goal> getGoalsByFacility(String facilityId, {bool activeOnly = true}) {
     final goals = _goalsList
@@ -155,30 +159,28 @@ class DatabaseService {
   }
 
   Future<Goal> addGoal(Goal goal) async {
-    await _firestore.collection('goals').doc(goal.goalId).set(goal.toMap());
+    await _upsert('goals', 'goal_id', goal.toMap());
     _goalsList.add(goal);
     return goal;
   }
 
   Future<void> updateGoal(Goal goal) async {
-    await _firestore.collection('goals').doc(goal.goalId).set(goal.toMap());
+    await _upsert('goals', 'goal_id', goal.toMap());
     _goalsList.removeWhere((g) => g.goalId == goal.goalId);
     _goalsList.add(goal);
   }
 
   Future<void> deleteGoal(String goalId) async {
-    await _firestore.collection('goals').doc(goalId).delete();
-    _goalsList.removeWhere((g) => g.goalId == goalId);
-    // Also delete all logs for this goal
     final logsToDelete = _logsList.where((l) => l.goalId == goalId).toList();
     for (final log in logsToDelete) {
-      await _firestore.collection('daily_logs').doc(log.logId).delete();
+      await _delete('daily_logs', 'log_id', log.logId);
     }
+    await _delete('goals', 'goal_id', goalId);
     _logsList.removeWhere((l) => l.goalId == goalId);
+    _goalsList.removeWhere((g) => g.goalId == goalId);
   }
 
-  Future<void> applyGoalTemplate(
-      String facilityId, String templateName) async {
+  Future<void> applyGoalTemplate(String facilityId, String templateName) async {
     final templates = GoalTemplates.getTemplate(templateName);
     final now = DateTime.now();
     for (var i = 0; i < templates.length; i++) {
@@ -199,8 +201,6 @@ class DatabaseService {
     }
   }
 
-  // ============ Daily Logs ============
-
   List<DailyLog> getLogsByFacility(String facilityId) {
     return _logsList.where((l) => l.facilityId == facilityId).toList();
   }
@@ -220,79 +220,66 @@ class DatabaseService {
   List<DailyLog> getLogsByMonth(String facilityId, int year, int month) {
     final prefix = '$year-${month.toString().padLeft(2, '0')}';
     return _logsList
-        .where(
-            (l) => l.facilityId == facilityId && l.logDate.startsWith(prefix))
+        .where((l) => l.facilityId == facilityId && l.logDate.startsWith(prefix))
         .toList();
   }
 
   Future<DailyLog> saveLog(DailyLog log) async {
-    // Check for duplicate: same facility, staff, goal, date
-    final existing = _logsList.where((l) =>
-        l.facilityId == log.facilityId &&
-        l.staffId == log.staffId &&
-        l.goalId == log.goalId &&
-        l.logDate == log.logDate);
+    final existing = _logsList.where(
+      (l) =>
+          l.facilityId == log.facilityId &&
+          l.staffId == log.staffId &&
+          l.goalId == log.goalId &&
+          l.logDate == log.logDate,
+    );
 
     if (existing.isNotEmpty) {
-      // Update existing log
       final updated = existing.first.copyWith(
         score: log.score,
         comment: log.comment,
         updatedAt: DateTime.now(),
       );
-      await _firestore
-          .collection('daily_logs')
-          .doc(updated.logId)
-          .set(updated.toMap());
+      await _upsert('daily_logs', 'log_id', updated.toMap());
       _logsList.removeWhere((l) => l.logId == updated.logId);
       _logsList.add(updated);
       return updated;
-    } else {
-      await _firestore
-          .collection('daily_logs')
-          .doc(log.logId)
-          .set(log.toMap());
-      _logsList.add(log);
-      return log;
     }
+
+    await _upsert('daily_logs', 'log_id', log.toMap());
+    _logsList.add(log);
+    return log;
   }
 
   Future<void> deleteLog(String logId) async {
-    await _firestore.collection('daily_logs').doc(logId).delete();
+    await _delete('daily_logs', 'log_id', logId);
     _logsList.removeWhere((l) => l.logId == logId);
   }
 
   Future<void> deleteFacility(String facilityId) async {
-    // Delete facility
-    await _firestore.collection('facilities').doc(facilityId).delete();
-    _facilities.removeWhere((f) => f.facilityId == facilityId);
-
-    // Delete all staff for this facility
-    final staffToDelete =
-        _staffList.where((s) => s.facilityId == facilityId).toList();
-    for (final s in staffToDelete) {
-      await _firestore.collection('staff').doc(s.staffId).delete();
-    }
-    _staffList.removeWhere((s) => s.facilityId == facilityId);
-
-    // Delete all goals for this facility
-    final goalsToDelete =
-        _goalsList.where((g) => g.facilityId == facilityId).toList();
-    for (final g in goalsToDelete) {
-      await _firestore.collection('goals').doc(g.goalId).delete();
-    }
-    _goalsList.removeWhere((g) => g.facilityId == facilityId);
-
-    // Delete all logs for this facility
     final logsToDelete =
         _logsList.where((l) => l.facilityId == facilityId).toList();
-    for (final l in logsToDelete) {
-      await _firestore.collection('daily_logs').doc(l.logId).delete();
+    for (final log in logsToDelete) {
+      await _delete('daily_logs', 'log_id', log.logId);
     }
+
+    final goalsToDelete =
+        _goalsList.where((g) => g.facilityId == facilityId).toList();
+    for (final goal in goalsToDelete) {
+      await _delete('goals', 'goal_id', goal.goalId);
+    }
+
+    final staffToDelete =
+        _staffList.where((s) => s.facilityId == facilityId).toList();
+    for (final staff in staffToDelete) {
+      await _delete('staff', 'staff_id', staff.staffId);
+    }
+
+    await _delete('facilities', 'facility_id', facilityId);
+    _facilities.removeWhere((f) => f.facilityId == facilityId);
+    _staffList.removeWhere((s) => s.facilityId == facilityId);
+    _goalsList.removeWhere((g) => g.facilityId == facilityId);
     _logsList.removeWhere((l) => l.facilityId == facilityId);
   }
-
-  // ============ Aggregation ============
 
   String? getLatestLogDate(String facilityId) {
     final logs = getLogsByFacility(facilityId);
